@@ -30,6 +30,13 @@ vim.wait(1000, function() return vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] ~
 local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 assert(vim.deep_equal(lines, { "import Button from './Button'", "const x = value", "moved()" }), vim.inspect(lines))
 
+-- a second new file in the same session gets its skeleton too (the
+-- BufNewFile hook must survive its first use)
+vim.cmd.edit(dir .. "/Card.stories.js")
+vim.api.nvim_exec_autocmds("SafeState", {})
+vim.wait(1000, function() return vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] ~= "" end)
+assert(vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] == "import Card from './Card'", "second new file")
+
 -- an existing, non-empty file is never touched
 vim.fn.writefile({ "keep" }, dir .. "/Old.stories.js")
 vim.cmd.edit(dir .. "/Old.stories.js")

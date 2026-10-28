@@ -198,15 +198,15 @@ local function setup(_3fopts)
       local function _31_()
         if (args.buf == vim.api.nvim_get_current_buf()) then
           state.pending = (state.pending or take_selection(from))
-          return apply(args.buf)
+          apply(args.buf)
         else
-          return nil
         end
+        return nil
       end
-      return vim.api.nvim_create_autocmd("SafeState", {once = true, callback = _31_})
+      vim.api.nvim_create_autocmd("SafeState", {once = true, callback = _31_})
     else
-      return nil
     end
+    return nil
   end
   vim.api.nvim_create_autocmd("BufNewFile", {group = vim.api.nvim_create_augroup("skeleton.nvim", {clear = true}), callback = _30_})
   local function _34_()

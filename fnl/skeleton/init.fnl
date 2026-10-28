@@ -160,7 +160,11 @@
                         :callback (fn []
                                     (when (= args.buf (vim.api.nvim_get_current_buf))
                                       (set state.pending (or state.pending (take-selection from)))
-                                      (apply args.buf)))}))))})
+                                      (apply args.buf))
+                                    nil)})))
+                 ;; nil: a truthy return value would delete this autocmd,
+                 ;; so only the session's first new file got a skeleton
+                 nil)})
   (vim.api.nvim_create_user_command "SkeletonApply" #(apply 0) {:desc "Fill this empty buffer from a skeleton"})
   (vim.api.nvim_create_user_command "SkeletonNew" #(new-skeleton $1.args)
                                     {:nargs "?" :desc "Create skeleton.<type>.<ext>"}))
