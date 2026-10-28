@@ -20,7 +20,7 @@
   (let [out []]
     (each [_ dir (ipairs dirs)]
       (each [name kind (vim.fs.dir (vim.fs.normalize dir))]
-        (when (= kind "file")
+        (when (or (= kind "file") (= kind "link"))
           (let [s (parse-skeleton (.. (vim.fs.normalize dir) "/" name))]
             (when s (table.insert out s))))))
     (table.sort out #(< $1.path $2.path))

@@ -16,7 +16,7 @@ local function scan(dirs)
   local out = {}
   for _, dir in ipairs(dirs) do
     for name, kind in vim.fs.dir(vim.fs.normalize(dir)) do
-      if (kind == "file") then
+      if ((kind == "file") or (kind == "link")) then
         local s = parse_skeleton((vim.fs.normalize(dir) .. "/" .. name))
         if s then
           table.insert(out, s)

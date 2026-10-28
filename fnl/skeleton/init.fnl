@@ -34,14 +34,15 @@
             (vim.api.nvim_buf_del_var buf v))
           sel)))))
 
-(fn expand [buf path]
+(fn expand [buf path ?from]
   ;; Why: the skeleton becomes a LuaSnip snippet expanded at the top of the
-  ;; empty buffer, so <C-j>/<C-k> walk its tab stops like any snippet.
+  ;; empty buffer, so <C-j>/<C-k> walk its tab stops like any snippet. The
+  ;; selection is taken only now, when a skeleton will actually use it.
   (let [ls (require :luasnip)
         text (with-name (table.concat (vim.fn.readfile path) "\n")
                         (vim.fs.basename (vim.api.nvim_buf_get_name buf)))
         snip (ls.parser.parse_snippet "" text {:trim_empty false :dedent false})
-        selection (or state.pending {})]
+        selection (or state.pending (take-selection ?from) {})]
     (set state.pending nil)
     (vim.api.nvim_set_current_buf buf)
     (vim.api.nvim_win_set_cursor 0 [1 0])
@@ -82,40 +83,52 @@
                                   (if entry.value.empty [] (vim.fn.readfile entry.value.path))))})
                 :attach_mappings
                 (fn [bufnr]
+                  (var chosen false)
                   (actions.select_default:replace
                     (fn []
                       (let [entry (action-state.get_selected_entry)]
+                        (set chosen true)
                         (actions.close bufnr)
-                        (when (and entry (not entry.value.empty))
-                          (on-choice entry.value.path)))))
+                        (on-choice (and entry (not entry.value.empty) entry.value.path)))))
+                  ;; closed without choosing (Esc): tell the caller (nil)
+                  (vim.api.nvim_create_autocmd "BufWipeout"
+                    {:buffer bufnr :once true
+                     :callback #(do (when (not chosen) (vim.schedule #(on-choice nil))) nil)})
                   true)})
              :find))
         (vim.ui.select items
                        {:prompt "Skeleton"
                         :format_item #(if $1.empty "empty file" (label $1))}
-                       (fn [s] (when (and s (not s.empty)) (on-choice s.path))))))))
+                       (fn [s] (on-choice (and s (not s.empty) s.path))))))))
 
 (fn empty-buffer? [buf]
   (and (vim.api.nvim_buf_is_valid buf)
        (= (vim.api.nvim_buf_line_count buf) 1)
        (= "" (. (vim.api.nvim_buf_get_lines buf 0 1 false) 1))))
 
-(fn apply [?buf]
+(fn apply [?buf ?from]
   ;; Why: the core action - choose a skeleton for this (empty) buffer's file
-  ;; name and expand it. Returns nothing; does nothing when none fits.
+  ;; name and expand it. ?from is the buffer a LuaSnip-cut selection may be
+  ;; waiting in. A selection from cut_then_new is dropped whenever nothing
+  ;; expands, so it can't land in some later file.
   (let [buf (if (or (= nil ?buf) (= 0 ?buf)) (vim.api.nvim_get_current_buf) ?buf)
         filename (vim.fs.basename (vim.api.nvim_buf_get_name buf))
         choice (and (not= filename "") (matcher.choose filename (matcher.scan state.dirs)))]
-    (when (and choice (empty-buffer? buf))
-      (if choice.auto
-        (expand buf choice.auto)
+    (if (not (and choice (empty-buffer? buf)))
+      (set state.pending nil)
+      choice.auto
+      (expand buf choice.auto ?from)
+      (do
         ;; ponytail: fixed 150ms wait so plugins that set up the new file
         ;; from deferred callbacks (Conjure starts its REPL that way) see the
         ;; file, not the picker's prompt, as the current buffer. Raise it if
         ;; a plugin still errors on the prompt buffer.
         (vim.defer_fn #(pick choice.pick choice.default
-                             #(when (empty-buffer? buf) (expand buf $1)))
-                      150)))))
+                             #(if (and $1 (empty-buffer? buf))
+                                (expand buf $1 ?from)
+                                (set state.pending nil)))
+                      150)))
+    nil))
 
 (fn new-skeleton [?spec]
   ;; Why: making a skeleton is just creating skeleton.<type>.<ext> in the
@@ -128,19 +141,48 @@
       (vim.ui.input {:prompt "New skeleton: skeleton."} open))))
 
 (fn cut-then-new [?dir ?prompt ?ext]
-  ;; Why: "move this code into a new file" in one key (visual mode): cut the
-  ;; selection, ask for a file name, and let the skeleton put the code at its
-  ;; $TM_SELECTED_TEXT. Replaces UltiSnips#SaveLastVisualSelection() +
-  ;; template#MakeNewFile() in project .nvimrc maps.
-  (let [lines (vim.fn.getregion (vim.fn.getpos "v") (vim.fn.getpos ".") {:type (vim.fn.mode)})
+  ;; Why: "move this code into a new file" in one key: ask for a file name,
+  ;; then cut the selection (or the last one, if called from normal mode) and
+  ;; let the skeleton put it at its $TM_SELECTED_TEXT. Nothing is cut if the
+  ;; prompt is cancelled or the file already exists, and the cut goes to the
+  ;; unnamed register, so `p` brings it back. Replaces
+  ;; UltiSnips#SaveLastVisualSelection() + template#MakeNewFile().
+  (let [mode (vim.fn.mode)
+        visual? (vim.tbl_contains ["v" "V" "\22"] mode)
+        lines (if visual?
+                (vim.fn.getregion (vim.fn.getpos "v") (vim.fn.getpos ".") {:type mode})
+                (vim.fn.getregion (vim.fn.getpos "'<") (vim.fn.getpos "'>") {:type (vim.fn.visualmode)}))
         dir (or ?dir (vim.fn.expand "%:p:h"))]
-    (vim.cmd "normal! \"_d")
-    (set state.pending {:LS_SELECT_RAW lines :LS_SELECT_DEDENT lines :TM_SELECTED_TEXT lines})
+    (when visual? (vim.cmd "exe \"normal! \\<Esc>\"")) ; sets '< '> for gv below
     (vim.ui.input {:prompt (or ?prompt "New file name: ") :completion "file"}
                   (fn [name]
-                    (if (and name (not= (vim.trim name) ""))
-                      (vim.cmd.edit (vim.fn.fnameescape (.. dir "/" (vim.trim name) (or ?ext ""))))
-                      (set state.pending nil))))))
+                    (let [name (and name (vim.trim name))
+                          path (and name (not= name "") (.. dir "/" name (or ?ext "")))]
+                      (if (not path) nil
+                          (= 1 (vim.fn.filereadable path))
+                          (vim.notify (.. "skeleton.nvim: " path " exists; nothing moved") vim.log.levels.WARN)
+                          (do
+                            (vim.cmd "normal! gvd")
+                            (set state.pending {:LS_SELECT_RAW lines :LS_SELECT_DEDENT lines
+                                                :TM_SELECTED_TEXT lines})
+                            (vim.cmd.edit (vim.fn.fnameescape path)))))))))
+
+(fn apply-when-idle [buf from]
+  ;; Why: apply once nvim is idle (SafeState) and the new file is the current
+  ;; buffer. Earlier, events and scheduled work right after BufNewFile
+  ;; (BufEnter, filetype setup) would end a snippet started now, and a picker
+  ;; would get the new file's setup run on its prompt. If another window has
+  ;; focus by then (`nvim -o a b`, a file tree), wait until the file is entered.
+  (vim.api.nvim_create_autocmd "SafeState"
+    {:once true
+     :callback (fn []
+                 (when (vim.api.nvim_buf_is_valid buf)
+                   (if (= buf (vim.api.nvim_get_current_buf))
+                     (apply buf from)
+                     (vim.api.nvim_create_autocmd "BufEnter"
+                       {:buffer buf :once true
+                        :callback (fn [] (apply-when-idle buf from) nil)})))
+                 nil)}))
 
 (fn setup [?opts]
   ;; Why: tell the plugin where skeletons live, and fill every new file.
@@ -149,19 +191,7 @@
     {:group (vim.api.nvim_create_augroup "skeleton.nvim" {:clear true})
      :callback (fn [args]
                  (when (= "" (. vim.bo args.buf :buftype))
-                   (let [from (vim.fn.bufnr "#")]
-                     ;; Deferred until nvim is idle (SafeState): events and
-                     ;; scheduled work right after BufNewFile (BufEnter,
-                     ;; filetype setup) would end a snippet started now, and
-                     ;; a picker opened earlier gets the new file's
-                     ;; treesitter setup run on its prompt buffer.
-                     (vim.api.nvim_create_autocmd "SafeState"
-                       {:once true
-                        :callback (fn []
-                                    (when (= args.buf (vim.api.nvim_get_current_buf))
-                                      (set state.pending (or state.pending (take-selection from)))
-                                      (apply args.buf))
-                                    nil)})))
+                   (apply-when-idle args.buf (vim.fn.bufnr "#")))
                  ;; nil: a truthy return value would delete this autocmd,
                  ;; so only the session's first new file got a skeleton
                  nil)})

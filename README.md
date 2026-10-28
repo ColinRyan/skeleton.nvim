@@ -20,4 +20,6 @@ require("skeleton").setup({ dirs = { "~/.config/nvim/skeletons" } })
 
 `:SkeletonNew [type.ext]` makes a skeleton, `:SkeletonApply` fills the
 current empty buffer. Source is Fennel in `fnl/`, compiled by nfnl into
-`lua/`. Tests: `nvim -l test/match_spec.lua`.
+`lua/`. Tests: `nvim -l test/match_spec.lua`, `nvim -l test/apply_spec.lua`,
+`nvim -l test/review_spec.lua` (the last two need LuaSnip; set `$LUASNIP` to
+its path if it is not in `~/.local/share/nvimplugged/LuaSnip`).
