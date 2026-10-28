@@ -109,7 +109,13 @@
     (when (and choice (empty-buffer? buf))
       (if choice.auto
         (expand buf choice.auto)
-        (pick choice.pick choice.default #(when (empty-buffer? buf) (expand buf $1)))))))
+        ;; ponytail: fixed 150ms wait so plugins that set up the new file
+        ;; from deferred callbacks (Conjure starts its REPL that way) see the
+        ;; file, not the picker's prompt, as the current buffer. Raise it if
+        ;; a plugin still errors on the prompt buffer.
+        (vim.defer_fn #(pick choice.pick choice.default
+                             #(when (empty-buffer? buf) (expand buf $1)))
+                      150)))))
 
 (fn new-skeleton [?spec]
   ;; Why: making a skeleton is just creating skeleton.<type>.<ext> in the
@@ -144,15 +150,21 @@
      :callback (fn [args]
                  (when (= "" (. vim.bo args.buf :buftype))
                    (let [from (vim.fn.bufnr "#")]
-                     ;; Deferred: events right after BufNewFile (BufEnter,
-                     ;; filetype detection) would end a snippet started now.
-                     (vim.schedule
-                       (fn []
-                         (when (= args.buf (vim.api.nvim_get_current_buf))
-                           (set state.pending (or state.pending (take-selection from)))
-                           (apply args.buf)))))))})
+                     ;; Deferred until nvim is idle (SafeState): events and
+                     ;; scheduled work right after BufNewFile (BufEnter,
+                     ;; filetype setup) would end a snippet started now, and
+                     ;; a picker opened earlier gets the new file's
+                     ;; treesitter setup run on its prompt buffer.
+                     (vim.api.nvim_create_autocmd "SafeState"
+                       {:once true
+                        :callback (fn []
+                                    (when (= args.buf (vim.api.nvim_get_current_buf))
+                                      (set state.pending (or state.pending (take-selection from)))
+                                      (apply args.buf)))}))))})
   (vim.api.nvim_create_user_command "SkeletonApply" #(apply 0) {:desc "Fill this empty buffer from a skeleton"})
   (vim.api.nvim_create_user_command "SkeletonNew" #(new-skeleton $1.args)
                                     {:nargs "?" :desc "Create skeleton.<type>.<ext>"}))
 
-{: setup : apply :new_skeleton new-skeleton :cut_then_new cut-then-new :_with_name with-name}
+{: setup : apply :new_skeleton new-skeleton :cut_then_new cut-then-new
+ ;; for tests
+ :_with_name with-name :_expand expand}

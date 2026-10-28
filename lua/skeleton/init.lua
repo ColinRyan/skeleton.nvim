@@ -143,14 +143,17 @@ local function apply(_3fbuf)
     if choice.auto then
       return expand(buf, choice.auto)
     else
-      local function _20_(_241)
-        if empty_buffer_3f(buf) then
-          return expand(buf, _241)
-        else
-          return nil
+      local function _20_()
+        local function _21_(_2410)
+          if empty_buffer_3f(buf) then
+            return expand(buf, _2410)
+          else
+            return nil
+          end
         end
+        return pick(choice.pick, choice.default, _21_)
       end
-      return pick(choice.pick, choice.default, _20_)
+      return vim.defer_fn(_20_, 150)
     end
   else
     return nil
@@ -158,14 +161,14 @@ local function apply(_3fbuf)
 end
 local function new_skeleton(_3fspec)
   local open
-  local function _24_(_241)
+  local function _25_(_241)
     if (_241 and (_241 ~= "")) then
       return vim.cmd.edit(vim.fn.fnameescape((vim.fs.normalize(state.dirs[1]) .. "/skeleton." .. _241)))
     else
       return nil
     end
   end
-  open = _24_
+  open = _25_
   if (_3fspec and (_3fspec ~= "")) then
     return open(_3fspec)
   else
@@ -177,7 +180,7 @@ local function cut_then_new(_3fdir, _3fprompt, _3fext)
   local dir = (_3fdir or vim.fn.expand("%:p:h"))
   vim.cmd("normal! \"_d")
   state.pending = {LS_SELECT_RAW = lines, LS_SELECT_DEDENT = lines, TM_SELECTED_TEXT = lines}
-  local function _27_(name)
+  local function _28_(name)
     if (name and (vim.trim(name) ~= "")) then
       return vim.cmd.edit(vim.fn.fnameescape((dir .. "/" .. vim.trim(name) .. (_3fext or ""))))
     else
@@ -185,14 +188,14 @@ local function cut_then_new(_3fdir, _3fprompt, _3fext)
       return nil
     end
   end
-  return vim.ui.input({prompt = (_3fprompt or "New file name: "), completion = "file"}, _27_)
+  return vim.ui.input({prompt = (_3fprompt or "New file name: "), completion = "file"}, _28_)
 end
 local function setup(_3fopts)
   state.dirs = ((_3fopts and _3fopts.dirs) or {"~/.config/nvim/skeletons"})
-  local function _29_(args)
+  local function _30_(args)
     if ("" == vim.bo[args.buf].buftype) then
       local from = vim.fn.bufnr("#")
-      local function _30_()
+      local function _31_()
         if (args.buf == vim.api.nvim_get_current_buf()) then
           state.pending = (state.pending or take_selection(from))
           return apply(args.buf)
@@ -200,19 +203,19 @@ local function setup(_3fopts)
           return nil
         end
       end
-      return vim.schedule(_30_)
+      return vim.api.nvim_create_autocmd("SafeState", {once = true, callback = _31_})
     else
       return nil
     end
   end
-  vim.api.nvim_create_autocmd("BufNewFile", {group = vim.api.nvim_create_augroup("skeleton.nvim", {clear = true}), callback = _29_})
-  local function _33_()
+  vim.api.nvim_create_autocmd("BufNewFile", {group = vim.api.nvim_create_augroup("skeleton.nvim", {clear = true}), callback = _30_})
+  local function _34_()
     return apply(0)
   end
-  vim.api.nvim_create_user_command("SkeletonApply", _33_, {desc = "Fill this empty buffer from a skeleton"})
-  local function _34_(_241)
+  vim.api.nvim_create_user_command("SkeletonApply", _34_, {desc = "Fill this empty buffer from a skeleton"})
+  local function _35_(_241)
     return new_skeleton(_241.args)
   end
-  return vim.api.nvim_create_user_command("SkeletonNew", _34_, {nargs = "?", desc = "Create skeleton.<type>.<ext>"})
+  return vim.api.nvim_create_user_command("SkeletonNew", _35_, {nargs = "?", desc = "Create skeleton.<type>.<ext>"})
 end
-return {setup = setup, apply = apply, new_skeleton = new_skeleton, cut_then_new = cut_then_new, _with_name = with_name}
+return {setup = setup, apply = apply, new_skeleton = new_skeleton, cut_then_new = cut_then_new, _with_name = with_name, _expand = expand}

@@ -16,13 +16,16 @@ vim.fn.writefile({ "import $NAME from './$NAME'", "const x = ${1:value}", "${2:$
   dir .. "/skeleton.stories.js")
 skeleton.setup({ dirs = { dir } })
 
--- source buffer with a stored selection (as LuaSnip's cut keys leave it)
+-- an existing source file with a stored selection (as LuaSnip's cut keys
+-- leave it)
+vim.fn.writefile({ "code" }, dir .. "/src.js")
 vim.cmd.edit(dir .. "/src.js")
 vim.b.LUASNIP_SELECT_RAW = { "moved()" }
 vim.b.LUASNIP_SELECT_DEDENT = { "moved()" }
 vim.b.LUASNIP_TM_SELECT = { "moved()" }
 
 vim.cmd.edit(dir .. "/Button.stories.js") -- doesn't exist: BufNewFile
+vim.api.nvim_exec_autocmds("SafeState", {}) -- headless: no idle loop
 vim.wait(1000, function() return vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] ~= "" end)
 local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 assert(vim.deep_equal(lines, { "import Button from './Button'", "const x = value", "moved()" }), vim.inspect(lines))
